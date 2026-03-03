@@ -46,18 +46,59 @@ CLIENT_MAPPING = {
     'IC-725861': 'PAM',
     'IC-740454': 'PAM',
     'IC-745103': 'PAM',
+
+    # PM (IC- codes)
+    'IC-831931': 'PM',  
+    'IC-831937': 'PM', 
+    'IC-831934': 'PM',  
+    'IC-831906': 'PM',  
+    'IC-831935': 'PM',  
+    'IC-831919': 'PM',
+    'IC-831913': 'PM',  
+    'IC-831917': 'PM',  
+    'IC-831911': 'PM',  
+    'IC-831908': 'PM',  
+    'IC-831918': 'PM',  
+    'IC-831932': 'PM',  
+    'IC-831909': 'PM', 
+    'IC-831925': 'PM',
+    'IC-831929': 'PM',
+    'IC-831944': 'PM', 
+    'IC-831938': 'PM', 
 }
 
 # Columns to include in output (all others will be excluded)
 INCLUDE_COLS = ['Client Name', 'Portfolio Value']
 
-
 def to_excel_bytes(df):
     """Convert DataFrame to Excel bytes for download."""
     buf = BytesIO()
-    df.to_excel(buf, index=False, engine='openpyxl')
+    
+    # Create Excel writer object
+    with pd.ExcelWriter(buf, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Sheet1')
+        
+        # Get the workbook and worksheet
+        workbook = writer.book
+        worksheet = writer.sheets['Sheet1']
+        
+        # Apply left alignment to all cells
+        from openpyxl.styles import Alignment
+        for row in worksheet.iter_rows():
+            for cell in row:
+                cell.alignment = Alignment(horizontal='left')
+        
+        # Apply currency format to Portfolio Value column if it exists
+        if 'Portfolio Value' in df.columns:
+            col_idx = df.columns.get_loc('Portfolio Value') + 1  # +1 because Excel is 1-indexed
+            col_letter = worksheet.cell(row=1, column=col_idx).column_letter
+            
+            # Apply currency format to all cells in Portfolio Value column (except header)
+            for row_num in range(2, len(df) + 2):  # Start from row 2 to skip header
+                cell = worksheet[f'{col_letter}{row_num}']
+                cell.number_format = '$#,##0.00'
+    
     return buf.getvalue()
-
 
 def process_file(uploaded_file, code_label):
     """Read uploaded Excel, classify rows, return PPE/PAM/Unknown DataFrames."""
@@ -76,9 +117,10 @@ def process_file(uploaded_file, code_label):
 
     ppe = df[df['_company'] == 'PPE'].drop(columns=['_company', '_source'])
     pam = df[df['_company'] == 'PAM'].drop(columns=['_company', '_source'])
+    pm = df[df['_company'] == 'PM'].drop(columns=['_company', '_source'])
     unknown = df[df['_company'] == 'UNKNOWN'].drop(columns=['_company', '_source'])
 
-    return ppe, pam, unknown
+    return ppe, pam, pm, unknown
 
 
 def filter_output_cols(df):
@@ -116,17 +158,19 @@ with col2:
 
 if pw8_file and pw9_file:
     with st.spinner("Processing files..."):
-        pw8_ppe, pw8_pam, pw8_unk = process_file(pw8_file, 'PW8')
-        pw9_ppe, pw9_pam, pw9_unk = process_file(pw9_file, 'PW9')
+        pw8_ppe, pw8_pam, pw8_pm, pw8_unk = process_file(pw8_file, 'PW8')
+        pw9_ppe, pw9_pam, pw9_pm, pw9_unk = process_file(pw9_file, 'PW9')
 
         # Combine PW8 + PW9 results
         all_ppe = pd.concat([pw8_ppe, pw9_ppe], ignore_index=True)
         all_pam = pd.concat([pw8_pam, pw9_pam], ignore_index=True)
+        all_pm = pd.concat([pw8_pm, pw9_pm], ignore_index=True)
         all_unknown = pd.concat([pw8_unk, pw9_unk], ignore_index=True)
 
         # Keep only Client Name and Portfolio Value for PPE & PAM outputs
         ppe_output = filter_output_cols(all_ppe)
         pam_output = filter_output_cols(all_pam)
+        pm_output = filter_output_cols(all_pm)
         unk_output = all_unknown  # Keep all columns for unknown so you can identify them
 
     st.success(f"✅ Done! — **PPE**: {len(ppe_output)} clients · **PAM**: {len(pam_output)} clients · **Unknown**: {len(unk_output)} clients")
@@ -134,7 +178,7 @@ if pw8_file and pw9_file:
     st.divider()
 
     # ── PPE Output ──
-    tab1, tab2, tab3 = st.tabs(["🔵 PPE (Phillip Private Equity)", "🟢 PAM (Australia)", "🔴 Unknown"])
+    tab1, tab2, tab3 ,tab4 = st.tabs(["🔵 PPE (Phillip Private Equity)", "🟢 PAM (Australia)", "🔴 Unknown", "🟣 PM (Pinnacle Marine)"])
 
     with tab1:
         st.subheader(f"PPE Clients ({len(ppe_output)})")
@@ -169,6 +213,16 @@ if pw8_file and pw9_file:
             )
         else:
             st.info("🎉 All clients matched — no unknowns!")
+
+    with tab4:
+        st.subheader(f"Pinnacle Marine Clients ({len(pm_output)})")
+        st.dataframe(pm_output, use_container_width=True, hide_index=True)
+        st.download_button(
+            "⬇️ Download PM Excel",
+            data=to_excel_bytes(pm_output),
+            file_name="PinnacleMarine_Clients.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
 elif pw8_file or pw9_file:
     st.info("Please upload **both** PW8 and PW9 files to proceed.")
